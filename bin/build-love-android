@@ -37,7 +37,6 @@ fail() {
 [[ "$APPLICATION_ID" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] \
     || fail "APPLICATION_ID must look like com.example.game"
 [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || fail "VERSION_CODE must be a positive integer"
-[[ "$OUTPUT_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || fail "OUTPUT_NAME must be a file name without slashes"
 export APP_NAME APPLICATION_ID VERSION_CODE VERSION_NAME ORIENTATION
 
 OUTPUT_APK="$OUT_DIR/$OUTPUT_NAME.apk"
