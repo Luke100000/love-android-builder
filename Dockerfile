@@ -2,7 +2,7 @@ FROM eclipse-temurin:17-jdk-jammy
 
 ARG ANDROID_COMPILE_SDK=34
 ARG ANDROID_BUILD_TOOLS=34.0.0
-ARG ANDROID_NDK=26.1.10909125
+ARG ANDROID_NDK_VERSION=26.1.10909125
 ARG ANDROID_CMAKE=3.22.1
 ARG LOVE_ANDROID_REF=11.5a
 
@@ -33,7 +33,7 @@ RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
         "platform-tools" \
         "platforms;android-${ANDROID_COMPILE_SDK}" \
         "build-tools;${ANDROID_BUILD_TOOLS}" \
-        "ndk;${ANDROID_NDK}" \
+        "ndk;${ANDROID_NDK_VERSION}" \
         "cmake;${ANDROID_CMAKE}"
 
 RUN git clone --depth 1 --branch "$LOVE_ANDROID_REF" --recurse-submodules \
