@@ -22,6 +22,6 @@ jobs:
 
       - name: Build images
         env:
-          IMAGE_REPO: Luke100000/love-android-builder
+          IMAGE_REPO: luke100000/love-android-builder
           PUSH: "1"
         run: scripts/build-images
