@@ -1,0 +1,8 @@
+.git
+.github
+out
+*.apk
+*.aab
+*.love
+*.keystore
+README.md

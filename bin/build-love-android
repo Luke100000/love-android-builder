@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LOVE_ANDROID_DIR="${LOVE_ANDROID_DIR:-$LOVE_ANDROID_HOME}"
+GAME_LOVE="${GAME_LOVE:-}"
+OUT_DIR="${OUT_DIR:-/out}"
+OUTPUT_NAME="${OUTPUT_NAME:-game}"
+APP_NAME="${APP_NAME:-Game}"
+APPLICATION_ID="${APPLICATION_ID:-org.love2d.game}"
+VERSION_CODE="${VERSION_CODE:-1}"
+VERSION_NAME="${VERSION_NAME:-1.0.0}"
+ORIENTATION="${ORIENTATION:-landscape}"
+ARTIFACTS="${ARTIFACTS:-apk aab}"
+RECORD_AUDIO="${RECORD_AUDIO:-false}"
+ICON="${ICON:-}"
+MANIFEST="${MANIFEST:-}"
+KEYSTORE="${KEYSTORE:-}"
+KEYSTORE_ALIAS="${KEYSTORE_ALIAS:-}"
+KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-}"
+KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+
+ASSETS="$LOVE_ANDROID_DIR/app/src/embed/assets"
+MAIN_RES="$LOVE_ANDROID_DIR/app/src/main/res"
+MAIN_MANIFEST="$LOVE_ANDROID_DIR/app/src/main/AndroidManifest.xml"
+GRADLE_PROPERTIES="$LOVE_ANDROID_DIR/gradle.properties"
+
+fail() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+[ -n "$GAME_LOVE" ] || fail "GAME_LOVE is required"
+[ -f "$GAME_LOVE" ] || fail "GAME_LOVE does not exist: $GAME_LOVE"
+[ -n "$KEYSTORE" ] || fail "KEYSTORE is required"
+[ -n "$KEYSTORE_ALIAS" ] || fail "KEYSTORE_ALIAS is required"
+[ -n "$KEYSTORE_PASSWORD" ] || fail "KEYSTORE_PASSWORD is required"
+[[ "$APPLICATION_ID" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] \
+    || fail "APPLICATION_ID must look like com.example.game"
+[[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || fail "VERSION_CODE must be a positive integer"
+[[ "$OUTPUT_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || fail "OUTPUT_NAME must be a file name without slashes"
+export APP_NAME APPLICATION_ID VERSION_CODE VERSION_NAME ORIENTATION
+
+OUTPUT_APK="$OUT_DIR/$OUTPUT_NAME.apk"
+OUTPUT_AAB="$OUT_DIR/$OUTPUT_NAME.aab"
+
+if [ ! -f "$KEYSTORE" ]; then
+    mkdir -p "$(dirname "$KEYSTORE")"
+    keytool -genkeypair \
+        -keystore "$KEYSTORE" \
+        -storepass "$KEYSTORE_PASSWORD" \
+        -keypass "$KEY_PASSWORD" \
+        -alias "$KEYSTORE_ALIAS" \
+        -dname "CN=Android Debug,O=love-android-builder,C=US" \
+        -keyalg RSA \
+        -keysize 2048 \
+        -validity 10000 >/dev/null
+    echo "Generated debug keystore at $KEYSTORE"
+fi
+
+case "$RECORD_AUDIO" in
+    true|1|yes|YES)
+        FLAVOR="EmbedRecord"
+        OUTPUT_FLAVOR_DIR="embedRecord"
+        OUTPUT_FLAVOR_NAME="embed-record"
+        ;;
+    false|0|no|NO)
+        FLAVOR="EmbedNoRecord"
+        OUTPUT_FLAVOR_DIR="embedNoRecord"
+        OUTPUT_FLAVOR_NAME="embed-noRecord"
+        ;;
+    *) fail "RECORD_AUDIO must be true or false" ;;
+esac
+
+mkdir -p "$ASSETS" "$OUT_DIR"
+rm -rf "$ASSETS"/*
+unzip -q "$GAME_LOVE" -d "$ASSETS"
+[ -f "$ASSETS/main.lua" ] || fail "game.love must contain main.lua at the archive root"
+
+python3 - "$GRADLE_PROPERTIES" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+remove = {
+    "app.name",
+    "app.name_byte_array",
+    "app.application_id",
+    "app.orientation",
+    "app.version_code",
+    "app.version_name",
+}
+with open(path, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+with open(path, "w", encoding="utf-8") as f:
+    for line in lines:
+        key = line.lstrip("#").split("=", 1)[0].strip()
+        if key not in remove:
+            f.write(line)
+    name_bytes = ",".join(str(b) for b in os.environ["APP_NAME"].encode("utf-8"))
+    f.write(f"app.name_byte_array={name_bytes}\n")
+    f.write(f"app.application_id={os.environ['APPLICATION_ID']}\n")
+    f.write(f"app.orientation={os.environ['ORIENTATION']}\n")
+    f.write(f"app.version_code={os.environ['VERSION_CODE']}\n")
+    f.write(f"app.version_name={os.environ['VERSION_NAME']}\n")
+PY
+
+if [ -n "$ICON" ]; then
+    [ -f "$ICON" ] || fail "ICON does not exist: $ICON"
+    convert "$ICON" -resize 48x48 "$MAIN_RES/drawable-mdpi/love.png"
+    convert "$ICON" -resize 72x72 "$MAIN_RES/drawable-hdpi/love.png"
+    convert "$ICON" -resize 96x96 "$MAIN_RES/drawable-xhdpi/love.png"
+    convert "$ICON" -resize 144x144 "$MAIN_RES/drawable-xxhdpi/love.png"
+    convert "$ICON" -resize 192x192 "$MAIN_RES/drawable-xxxhdpi/love.png"
+fi
+
+if [ -n "$MANIFEST" ]; then
+    [ -f "$MANIFEST" ] || fail "MANIFEST does not exist: $MANIFEST"
+    cp "$MANIFEST" "$MAIN_MANIFEST"
+fi
+
+cd "$LOVE_ANDROID_DIR"
+
+for artifact in $ARTIFACTS; do
+    case "$artifact" in
+        apk)
+            ./gradlew --no-daemon "assemble${FLAVOR}Release"
+            unsigned_apk="app/build/outputs/apk/$OUTPUT_FLAVOR_DIR/release/app-$OUTPUT_FLAVOR_NAME-release-unsigned.apk"
+            cp "$unsigned_apk" "$OUTPUT_APK"
+            apksigner sign \
+                --ks "$KEYSTORE" \
+                --ks-key-alias "$KEYSTORE_ALIAS" \
+                --ks-pass "pass:$KEYSTORE_PASSWORD" \
+                --key-pass "pass:$KEY_PASSWORD" \
+                --v4-signing-enabled false \
+                "$OUTPUT_APK"
+            apksigner verify "$OUTPUT_APK"
+            ;;
+        aab)
+            ./gradlew --no-daemon "bundle${FLAVOR}Release"
+            unsigned_aab="app/build/outputs/bundle/${OUTPUT_FLAVOR_DIR}Release/app-$OUTPUT_FLAVOR_NAME-release.aab"
+            cp "$unsigned_aab" "$OUTPUT_AAB"
+            jarsigner \
+                -keystore "$KEYSTORE" \
+                -storepass "$KEYSTORE_PASSWORD" \
+                -keypass "$KEY_PASSWORD" \
+                "$OUTPUT_AAB" \
+                "$KEYSTORE_ALIAS"
+            jarsigner -verify "$OUTPUT_AAB"
+            ;;
+        *)
+            fail "unknown artifact '$artifact' in ARTIFACTS; use apk, aab, or both"
+            ;;
+    esac
+done

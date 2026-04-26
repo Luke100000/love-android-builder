@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$ROOT_DIR/.." && pwd)"
+IMAGE_REPO="${IMAGE_REPO:-luke100000/love-android-builder}"
+TAG="${TAG:-11.5}"
+IMAGE="${IMAGE:-}"
+OUT_DIR="${OUT_DIR:-$ROOT_DIR/out}"
+KEYSTORE_DIR="${KEYSTORE_DIR:-$OUT_DIR/keystore-cache}"
+KEYSTORE="${KEYSTORE:-$KEYSTORE_DIR/debug.keystore}"
+KEYSTORE_ALIAS="${KEYSTORE_ALIAS:-androiddebugkey}"
+KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-android}"
+KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+GAME_LOVE="${GAME_LOVE:-$ROOT_DIR/out/example.love}"
+ICON="${ICON:-$ROOT_DIR/example/icon.png}"
+
+fail() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: scripts/test-image [--tag TAG]
+
+Package the example game and run one builder image against it.
+
+Environment:
+  IMAGE_REPO              Docker repository, default: luke100000/love-android-builder
+  TAG=11.5                Image tag to test
+  IMAGE                   Full image override, for example local-builder:test
+  OUT_DIR                 Output directory, default: out
+
+Examples:
+  scripts/test-image --tag 11.5
+  IMAGE_REPO=myuser/love-android-builder scripts/test-image --tag 11.4
+  IMAGE=love-android-builder:dev scripts/test-image
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --tag)
+            [ "$#" -ge 2 ] || fail "--tag requires a value"
+            TAG="$2"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            fail "unknown argument: $1"
+            ;;
+    esac
+    shift
+done
+
+if [ -z "$IMAGE" ]; then
+    IMAGE="$IMAGE_REPO:$TAG"
+fi
+
+mkdir -p "$OUT_DIR" "$KEYSTORE_DIR"
+
+if [ ! -f "$GAME_LOVE" ]; then
+    mkdir -p "$(dirname "$GAME_LOVE")"
+    (
+        cd "$ROOT_DIR/example"
+        zip -qr "$GAME_LOVE" .
+    )
+fi
+
+docker run --rm \
+    -v "$ROOT_DIR:$ROOT_DIR" \
+    -e APP_NAME="${APP_NAME:-Test Game}" \
+    -e APPLICATION_ID="${APPLICATION_ID:-org.love2d.testgame}" \
+    -e VERSION_CODE="${VERSION_CODE:-1}" \
+    -e VERSION_NAME="${VERSION_NAME:-1.0.0}" \
+    -e GAME_LOVE="$GAME_LOVE" \
+    -e OUT_DIR="$OUT_DIR" \
+    -e ICON="$ICON" \
+    -e KEYSTORE="$KEYSTORE" \
+    -e KEYSTORE_ALIAS="$KEYSTORE_ALIAS" \
+    -e KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" \
+    -e KEY_PASSWORD="$KEY_PASSWORD" \
+    -e ARTIFACTS="${ARTIFACTS:-apk aab}" \
+    "$IMAGE"
